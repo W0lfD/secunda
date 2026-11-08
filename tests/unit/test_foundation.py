@@ -83,3 +83,29 @@ def test_wire_schemas_serialize_money_as_fixed_decimal_string() -> None:
     assert response.model_dump(mode="json")["payment_id"] == str(ident)
     assert envelope.model_dump(mode="json")["work_version"] == 0
     assert notification.model_dump(mode="json")["amount"] == "12.50"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:pass@example.com/hook",
+        "https://user@example.com/hook",
+        "https://@example.com/hook",
+        r"https:\\user:pass@example.com/hook",
+        r"https:\\@example.com/hook",
+    ],
+)
+def test_webhook_url_rejects_userinfo(url: str) -> None:
+    with pytest.raises(ValidationError):
+        payment(webhook_url=url)
+
+
+def test_allowed_origin_preserves_explicit_zero_port() -> None:
+    settings = Settings(api_key="a" * 32, webhook_allowed_origins=["https://example.com:0"])
+    assert settings.webhook_allowed_origins == ["https://example.com:0"]
+
+
+def test_allowed_origin_normalizes_idna_like_request_url() -> None:
+    settings = Settings(api_key="a" * 32, webhook_allowed_origins=["https://bücher.de"])
+    request = payment(webhook_url="https://bücher.de/hook")
+    assert settings.webhook_allowed_origins == [f"https://{request.webhook_url.host}"]

@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def normalize_origin(value: str) -> str:
-    TypeAdapter(HttpUrl).validate_python(value)
+    validated = TypeAdapter(HttpUrl).validate_python(value)
     try:
         parsed = urlsplit(value)
         port = parsed.port
@@ -21,11 +21,11 @@ def normalize_origin(value: str) -> str:
         or parsed.fragment
     ):
         raise ValueError("webhook origin must contain only scheme, host and optional port")
-    host = parsed.hostname.lower()
-    if ":" in host:
-        host = f"[{host}]"
+    host = validated.host
     default_port = 80 if parsed.scheme == "http" else 443
-    return f"{parsed.scheme}://{host}" + (f":{port}" if port and port != default_port else "")
+    return f"{parsed.scheme}://{host}" + (
+        f":{port}" if port is not None and port != default_port else ""
+    )
 
 
 class Settings(BaseSettings):

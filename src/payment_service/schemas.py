@@ -3,9 +3,10 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, Field, HttpUrl, field_serializer
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, HttpUrl, field_serializer
 
 
 class Currency(StrEnum):
@@ -32,12 +33,23 @@ def validate_key(value: str) -> str:
 IdempotencyKey = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(validate_key)]
 
 
+def reject_url_userinfo(value: Any) -> Any:
+    url = str(value)
+    authority = urlsplit(url).netloc
+    if "\\" in url or not authority or "@" in authority:
+        raise ValueError("webhook URL must have an authority without userinfo")
+    return value
+
+
+WebhookUrl = Annotated[HttpUrl, BeforeValidator(reject_url_userinfo)]
+
+
 class PaymentCreate(BaseModel):
     amount: Money
     currency: Currency
     description: str
     metadata: dict[str, Any]
-    webhook_url: HttpUrl
+    webhook_url: WebhookUrl
 
     @field_serializer("amount")
     def serialize_amount(self, value: Decimal) -> str:
@@ -64,7 +76,7 @@ class PaymentDetails(PaymentResponse):
     currency: Currency
     description: str
     metadata: dict[str, Any]
-    webhook_url: HttpUrl
+    webhook_url: WebhookUrl
     processed_at: datetime | None = None
 
     @field_serializer("amount")
