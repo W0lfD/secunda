@@ -6,13 +6,17 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import HttpUrl
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from payment_service.config import Settings, normalize_origin
+from payment_service.database import create_engine
 from payment_service.schemas import (
     Currency,
     IdempotencyKey,
@@ -34,26 +38,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        engine = create_async_engine(settings.database_url)
+        engine = create_engine(settings)
         app.state.sessions = async_sessionmaker(engine, expire_on_commit=False)
         try:
             yield
         finally:
             await engine.dispose()
 
-    async def authenticate(x_api_key: Annotated[str | None, Header()] = None) -> None:
-        if x_api_key is None or not compare_digest(
-            x_api_key.encode("utf-8"), settings.api_key.get_secret_value().encode("utf-8")
-        ):
-            raise HTTPException(status_code=401, detail="Invalid API key")
+    app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
-    app = FastAPI(
-        lifespan=lifespan,
-        docs_url=None,
-        redoc_url=None,
-        openapi_url=None,
-        dependencies=[Depends(authenticate)],
-    )
+    @app.middleware("http")
+    async def authenticate(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        key = request.headers.get("X-API-Key")
+        if key is None or not compare_digest(
+            key.encode("utf-8"), settings.api_key.get_secret_value().encode("utf-8")
+        ):
+            return JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+        return await call_next(request)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        errors = [
+            {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+            for error in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": errors})
+
     session_dep = Depends(get_session)
 
     @app.get("/openapi.json", include_in_schema=False)

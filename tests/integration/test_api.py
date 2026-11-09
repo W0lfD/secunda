@@ -30,7 +30,12 @@ async def client():
     async with engine.begin() as conn:
         await conn.execute(text("TRUNCATE outbox, payments CASCADE"))
     app = create_app(
-        Settings(api_key=KEY, webhook_allowed_origins=["https://example.com"], database_url=URL)
+        Settings(
+            api_key=KEY,
+            webhook_allowed_origins=["https://example.com"],
+            database_url=URL,
+            database_timeout_seconds=0.5,
+        )
     )
     async with (
         app.router.lifespan_context(app),
@@ -109,4 +114,65 @@ async def test_outbox_failure_rolls_back_payment(client, monkeypatch):
     async with engine.connect() as conn:
         assert (await conn.execute(text("SELECT count(*) FROM payments"))).scalar_one() == 0
         assert (await conn.execute(text("SELECT count(*) FROM outbox"))).scalar_one() == 0
+    await engine.dispose()
+
+
+async def test_auth_precedes_malformed_json(client):
+    for headers in ({}, {"X-API-Key": "wrong"}):
+        response = await client.post(
+            "/api/v1/payments", headers={**headers, "Content-Type": "application/json"}, content="{"
+        )
+        assert response.status_code == 401
+
+
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity"])
+async def test_nested_nonfinite_metadata_is_rejected(client, number):
+    content = (
+        '{"amount":"12.00","currency":"USD","description":"order",'
+        '"metadata":{"nested":[{"number":' + number + "}]},"
+        '"webhook_url":"https://example.com/hook"}'
+    )
+    response = await client.post(
+        "/api/v1/payments",
+        headers={"X-API-Key": KEY, "Idempotency-Key": "bad", "Content-Type": "application/json"},
+        content=content,
+    )
+    assert response.status_code == 422
+
+
+async def test_repeat_returns_current_terminal_status(client):
+    headers = {"X-API-Key": KEY, "Idempotency-Key": "terminal"}
+    first = await client.post("/api/v1/payments", headers=headers, json=BODY)
+    engine = create_async_engine(URL)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE payments SET status = 'succeeded' WHERE idempotency_key = 'terminal'")
+        )
+    await engine.dispose()
+    repeat = await client.post("/api/v1/payments", headers=headers, json=BODY)
+    assert repeat.status_code == 202
+    assert repeat.json()["payment_id"] == first.json()["payment_id"]
+    assert repeat.json()["status"] == "succeeded"
+
+
+async def test_conflicting_insert_wait_is_bounded(client):
+    from sqlalchemy.exc import DBAPIError
+
+    engine = create_async_engine(URL)
+    async with engine.connect() as conn, conn.begin():
+        await conn.execute(
+            text("""INSERT INTO payments (id, idempotency_key, canonical_request,
+                amount, currency, description, metadata, webhook_url)
+                VALUES (:id, 'locked', '{}', 1, 'USD', 'x', '{}', 'https://example.com')"""),
+            {"id": uuid4()},
+        )
+        with pytest.raises(DBAPIError, match="lock timeout|statement timeout"):
+            await asyncio.wait_for(
+                client.post(
+                    "/api/v1/payments",
+                    headers={"X-API-Key": KEY, "Idempotency-Key": "locked"},
+                    json=BODY,
+                ),
+                timeout=2,
+            )
     await engine.dispose()

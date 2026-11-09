@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -6,7 +7,15 @@ from typing import Annotated, Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, HttpUrl, field_serializer
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    Field,
+    HttpUrl,
+    field_serializer,
+    field_validator,
+)
 
 
 class Currency(StrEnum):
@@ -50,6 +59,22 @@ class PaymentCreate(BaseModel):
     description: str
     metadata: dict[str, Any]
     webhook_url: WebhookUrl
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        def check(item: Any) -> None:
+            if isinstance(item, float) and not math.isfinite(item):
+                raise ValueError("metadata must contain finite numbers")
+            if isinstance(item, dict):
+                for nested in item.values():
+                    check(nested)
+            elif isinstance(item, list):
+                for nested in item:
+                    check(nested)
+
+        check(value)
+        return value
 
     @field_serializer("amount")
     def serialize_amount(self, value: Decimal) -> str:
