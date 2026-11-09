@@ -72,6 +72,7 @@ class PaymentResponse(BaseModel):
 
 
 class PaymentDetails(PaymentResponse):
+    idempotency_key: str
     amount: Money
     currency: Currency
     description: str
