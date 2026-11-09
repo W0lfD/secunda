@@ -57,3 +57,15 @@ class OutboxRepository:
                 },
             )
         )
+
+    async def lock_ready(self) -> Outbox | None:
+        from sqlalchemy import func
+
+        statement = (
+            select(Outbox)
+            .where(Outbox.published_at.is_(None), Outbox.available_at <= func.now())
+            .order_by(Outbox.available_at, Outbox.id)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none()
