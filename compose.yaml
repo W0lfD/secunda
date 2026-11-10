@@ -1,3 +1,9 @@
+x-payment-environment: &payment-environment
+  PAYMENT_API_KEY: ${PAYMENT_API_KEY:-local-development-api-key-change-me-123456}
+  PAYMENT_DATABASE_URL: postgresql+asyncpg://payments:payments@postgres:5432/payments
+  PAYMENT_RABBITMQ_URL: amqp://payments:payments@rabbitmq:5672/
+  PAYMENT_WEBHOOK_ALLOWED_ORIGINS: '${PAYMENT_WEBHOOK_ALLOWED_ORIGINS:-["http://callback:8080"]}'
+
 services:
   postgres:
     image: postgres:18.3-alpine
@@ -6,14 +12,14 @@ services:
       POSTGRES_PASSWORD: payments
       POSTGRES_DB: payments
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   rabbitmq:
     image: rabbitmq:4.2.4-management-alpine
@@ -21,15 +27,56 @@ services:
       RABBITMQ_DEFAULT_USER: payments
       RABBITMQ_DEFAULT_PASS: payments
     ports:
-      - "127.0.0.1:5673:5672"
-      - "127.0.0.1:15673:15672"
+      - "127.0.0.1:${RABBIT_PORT:-5673}:5672"
+      - "127.0.0.1:${RABBIT_MANAGEMENT_PORT:-15673}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+
+  migrate:
+    build: .
+    environment: *payment-environment
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    environment: *payment-environment
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import os,urllib.request; urllib.request.urlopen(urllib.request.Request(\"http://localhost:8000/ready\", headers={\"X-API-Key\":os.environ[\"PAYMENT_API_KEY\"]}))'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  consumer:
+    build: .
+    environment: *payment-environment
+    command: ["python", "-m", "payment_service.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  callback:
+    build: .
+    command: ["python", "tools/callback.py"]
+    profiles: ["demo", "test"]
+    ports:
+      - "127.0.0.1:${CALLBACK_PORT:-8080}:8080"
 
 volumes:
   postgres_data:

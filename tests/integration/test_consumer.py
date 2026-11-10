@@ -305,3 +305,63 @@ async def test_nonterminal_gateway_response_is_retryable_error(engine):
         assert payment.processing_attempts == 1 and len(events) == 1
     finally:
         await webhook.close()
+
+
+async def test_restart_after_terminal_commit_resumes_webhook(engine):
+    body = await seed(engine)
+    entered = asyncio.Event()
+    gateway = Gateway()
+
+    async def interrupted(request):
+        entered.set()
+        await asyncio.Event().wait()
+
+    first, first_webhook = make_consumer(engine, gateway, interrupted)
+    task = asyncio.create_task(first.process(json.dumps(body).encode()))
+    try:
+        await asyncio.wait_for(entered.wait(), 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        payment, events = await state(engine)
+        assert payment.status == "succeeded" and not payment.webhook_sent_at and not events
+        callback = Callback()
+        resumed, resumed_webhook = make_consumer(engine, gateway, callback)
+        try:
+            assert await resumed.process(json.dumps(body).encode()) == "ack"
+            payment, _ = await state(engine)
+            assert payment.webhook_sent_at and gateway.calls == 1
+            assert len(callback.payloads) == 1
+        finally:
+            await resumed_webhook.close()
+    finally:
+        await first_webhook.close()
+
+
+async def test_competing_consumers_and_lost_retry_ack_create_one_continuation(engine):
+    body = await seed(engine)
+    gateway, callback = Gateway(), Callback([500, 200])
+    first, first_webhook = make_consumer(engine, gateway, callback)
+    second, second_webhook = make_consumer(engine, gateway, callback)
+    try:
+        encoded = json.dumps(body).encode()
+        assert await asyncio.gather(first.process(encoded), second.process(encoded)) == [
+            "ack",
+            "ack",
+        ]
+        payment, events = await state(engine)
+        assert payment.status == "succeeded" and payment.webhook_attempts == 1
+        assert gateway.calls == 1 and len(callback.payloads) == 1
+        assert len(events) == 1 and events[0].work_version == 1
+        # Redelivery of the original after the retry commit is stale.
+        assert await second.process(encoded) == "ack"
+        _, events = await state(engine)
+        assert len(events) == 1 and len(callback.payloads) == 1
+        retry = json.dumps(events[0].payload).encode()
+        assert await asyncio.gather(first.process(retry), second.process(retry)) == ["ack", "ack"]
+        payment, events = await state(engine)
+        assert payment.webhook_sent_at and len(events) == 1
+        assert gateway.calls == 1 and len(callback.payloads) == 2
+    finally:
+        await first_webhook.close()
+        await second_webhook.close()

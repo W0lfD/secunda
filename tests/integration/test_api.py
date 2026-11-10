@@ -176,3 +176,38 @@ async def test_conflicting_insert_wait_is_bounded(client):
                 timeout=2,
             )
     await engine.dispose()
+
+
+async def test_numeric_amount_preserves_precision_and_string_equivalence(client):
+    headers = {"X-API-Key": KEY, "Idempotency-Key": "precise", "Content-Type": "application/json"}
+    content = (
+        '{"amount":1234567890123456.78,"currency":"USD","description":"order",'
+        '"metadata":{"fraction":1.25},"webhook_url":"https://example.com/hook"}'
+    )
+    response = await client.post("/api/v1/payments", headers=headers, content=content)
+    assert response.status_code == 202
+    payment_id = response.json()["payment_id"]
+    details = (await client.get("/api/v1/payments/" + payment_id, headers=headers)).json()
+    assert details["amount"] == "1234567890123456.78"
+    assert details["metadata"] == {"fraction": 1.25}
+    equivalent = content.replace("1234567890123456.78", '"1234567890123456.78"')
+    assert (await client.post("/api/v1/payments", headers=headers, content=equivalent)).json()[
+        "payment_id"
+    ] == payment_id
+
+
+async def test_numeric_amount_limits_are_validated_without_rounding(client):
+    headers = {"X-API-Key": KEY, "Idempotency-Key": "limits", "Content-Type": "application/json"}
+    template = (
+        '{"amount":%s,"currency":"USD","description":"order",'
+        '"metadata":{},"webhook_url":"https://example.com/hook"}'
+    )
+    maximum = await client.post(
+        "/api/v1/payments", headers=headers, content=template % "9999999999999999.99"
+    )
+    assert maximum.status_code == 202
+    details = await client.get("/api/v1/payments/" + maximum.json()["payment_id"], headers=headers)
+    assert details.json()["amount"] == "9999999999999999.99"
+    for amount in ("10000000000000000.00", "1234567890123456.789"):
+        response = await client.post("/api/v1/payments", headers=headers, content=template % amount)
+        assert response.status_code == 422

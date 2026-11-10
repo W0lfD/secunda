@@ -1,7 +1,9 @@
-from collections.abc import AsyncIterator
+import json
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from hmac import compare_digest
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -9,6 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import HttpUrl
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -26,6 +29,25 @@ from payment_service.schemas import (
     PaymentStatus,
 )
 from payment_service.service import IdempotencyConflict, PaymentService
+
+
+class MoneyRequest(Request):
+    async def json(self) -> Any:
+        data = await super().json()
+        if isinstance(data, dict) and "amount" in data:
+            exact = json.loads(await self.body(), parse_float=Decimal)
+            data["amount"] = exact["amount"]
+        return data
+
+
+class MoneyRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def route(request: Request) -> Response:
+            return await handler(MoneyRequest(request.scope, request.receive))
+
+        return route
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -46,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await engine.dispose()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.router.route_class = MoneyRoute
 
     @app.middleware("http")
     async def authenticate(request: Request, call_next: RequestResponseEndpoint) -> Response:

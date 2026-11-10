@@ -188,3 +188,36 @@ async def test_prefetch_blocks_second_delivery_while_first_holds_lock(engine, br
         stop.set()
         await asyncio.wait_for(task, 3)
         await webhook.close()
+
+
+async def test_delayed_retry_survives_worker_restart(engine, broker_resources):
+    from datetime import UTC, datetime
+
+    body = await seed(engine)
+    gateway, callback = Gateway(), Callback([500, 200])
+    first, first_webhook = make_consumer(engine, gateway, callback)
+    assert await first.process(json.dumps(body).encode()) == "ack"
+    payment, events = await state(engine)
+    assert payment.webhook_attempts == 1 and len(events) == 1
+    assert events[0].available_at > datetime.now(UTC)
+    await first_webhook.close()
+
+    restarted, restarted_webhook = make_consumer(engine, gateway, callback)
+    publisher = Publisher(RABBIT, 1, broker=create_broker(RABBIT, 1))
+    stop = asyncio.Event()
+    task = asyncio.create_task(serve(engine, publisher, restarted, stop))
+    try:
+
+        async def delivered():
+            payment, _ = await state(engine)
+            return payment.webhook_sent_at is not None
+
+        await eventually(delivered)
+        payment, events = await state(engine)
+        assert payment.status == "succeeded" and gateway.calls == 1
+        assert len(events) == 1 and events[0].published_at is not None
+        assert callback.payloads[0] == callback.payloads[1]
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, 3)
+        await restarted_webhook.close()
