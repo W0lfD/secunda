@@ -127,3 +127,52 @@ def test_compose_recovers_pending_work_and_delivers_callbacks():
         raise
     finally:
         subprocess.run([*base, "down", "-v", "--remove-orphans"], env=env, check=True, timeout=120)
+
+
+def test_rabbitmq_message_survives_container_recreation():
+    project = "payments-e2e-" + uuid4().hex[:12]
+    env = {**os.environ, "RABBIT_PORT": "0", "RABBIT_MANAGEMENT_PORT": "0"}
+    base = ["docker", "compose", "-p", project]
+
+    def compose(*args):
+        return subprocess.run(
+            [*base, *args], env=env, check=True, text=True, capture_output=True, timeout=240
+        ).stdout
+
+    def management():
+        port = compose("port", "rabbitmq", "15672").strip().rsplit(":", 1)[1]
+        return f"http://127.0.0.1:{port}/api"
+
+    auth = ("payments", "payments")
+    try:
+        compose("up", "-d", "--wait", "rabbitmq")
+        api = management()
+        queue = httpx.put(
+            api + "/queues/%2F/persistence-probe", auth=auth, json={"durable": True}, timeout=5
+        )
+        assert queue.status_code in (201, 204), queue.text
+        published = httpx.post(
+            api + "/exchanges/%2F/amq.default/publish",
+            auth=auth,
+            json={
+                "properties": {"delivery_mode": 2},
+                "routing_key": "persistence-probe",
+                "payload": "persisted message",
+                "payload_encoding": "string",
+            },
+            timeout=5,
+        )
+        assert published.json() == {"routed": True}
+        compose("up", "-d", "--force-recreate", "--wait", "rabbitmq")
+        response = httpx.post(
+            management() + "/queues/%2F/persistence-probe/get",
+            auth=auth,
+            json={"count": 1, "ackmode": "ack_requeue_false", "encoding": "auto"},
+            timeout=5,
+        )
+        assert response.status_code == 200, response.text
+        messages = response.json()
+        assert len(messages) == 1 and messages[0]["payload"] == "persisted message"
+        assert messages[0]["properties"]["delivery_mode"] == 2
+    finally:
+        subprocess.run([*base, "down", "-v", "--remove-orphans"], env=env, check=True, timeout=120)

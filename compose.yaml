@@ -22,6 +22,7 @@ services:
       retries: 20
 
   rabbitmq:
+    hostname: rabbitmq
     image: rabbitmq:4.2.4-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: payments
