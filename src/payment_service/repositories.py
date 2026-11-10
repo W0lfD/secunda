@@ -35,6 +35,10 @@ class PaymentRepository:
             await self.session.execute(select(Payment).where(Payment.idempotency_key == key))
         ).scalar_one()
 
+    async def lock(self, payment_id: UUID) -> Payment | None:
+        statement = select(Payment).where(Payment.id == payment_id).with_for_update()
+        return (await self.session.execute(statement)).scalar_one_or_none()
+
     async def get(self, payment_id: UUID) -> Payment | None:
         return await self.session.get(Payment, payment_id)
 
