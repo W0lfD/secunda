@@ -174,5 +174,16 @@ def test_rabbitmq_message_survives_container_recreation():
         messages = response.json()
         assert len(messages) == 1 and messages[0]["payload"] == "persisted message"
         assert messages[0]["properties"]["delivery_mode"] == 2
+    except Exception:
+        print(
+            subprocess.run(
+                [*base, "logs", "--no-color", "--tail=100"],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            ).stdout
+        )
+        raise
     finally:
         subprocess.run([*base, "down", "-v", "--remove-orphans"], env=env, check=True, timeout=120)
