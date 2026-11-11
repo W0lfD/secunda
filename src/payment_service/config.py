@@ -29,12 +29,12 @@ def normalize_origin(value: str) -> str:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="PAYMENT_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="PAYMENT_", env_file=".env", extra="ignore")
 
     api_key: SecretStr
     webhook_allowed_origins: list[str] = Field(min_length=1)
-    database_url: str = "postgresql+asyncpg://payments:payments@localhost:55432/payments"
-    rabbitmq_url: str = "amqp://payments:payments@localhost:5673/"
+    database_url: str
+    rabbitmq_url: str
     webhook_timeout_seconds: float = Field(default=10, gt=0, le=300)
     gateway_timeout_seconds: float = Field(default=10, gt=0, le=300)
     broker_timeout_seconds: float = Field(default=10, gt=0, le=300)

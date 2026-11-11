@@ -1,6 +1,5 @@
 UV ?= uv
-export TEST_DATABASE_URL := postgresql+asyncpg://payments:payments@127.0.0.1:55432/payments_test
-export TEST_RABBITMQ_URL := amqp://payments:payments@127.0.0.1:5673/payments_test
+UV_RUN = $(UV) run --env-file .env
 
 .PHONY: sync format lint typecheck unit bootstrap integration smoke test audit logs
 sync:
@@ -13,15 +12,15 @@ typecheck:
 	$(UV) run mypy src
 unit:
 	mkdir -p reports
-	$(UV) run pytest tests/unit --junitxml=reports/unit.xml --cov=payment_service --cov-report=xml:reports/unit-coverage.xml
+	$(UV_RUN) pytest tests/unit --junitxml=reports/unit.xml --cov=payment_service --cov-report=xml:reports/unit-coverage.xml
 bootstrap:
-	sh tools/bootstrap-test.sh
+	$(UV_RUN) sh tools/bootstrap-test.sh
 integration: bootstrap
 	mkdir -p reports
-	$(UV) run pytest tests/integration --junitxml=reports/integration.xml --cov=payment_service --cov-report=xml:reports/integration-coverage.xml
+	$(UV_RUN) pytest tests/integration --junitxml=reports/integration.xml --cov=payment_service --cov-report=xml:reports/integration-coverage.xml
 smoke:
 	mkdir -p reports
-	RUN_COMPOSE_E2E=1 $(UV) run pytest tests/e2e -o junit_logging=all --junitxml=reports/e2e.xml
+	RUN_COMPOSE_E2E=1 $(UV_RUN) pytest tests/e2e -o junit_logging=all --junitxml=reports/e2e.xml
 test: unit integration smoke
 audit:
 	mkdir -p reports

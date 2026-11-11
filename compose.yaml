@@ -1,22 +1,22 @@
 x-payment-environment: &payment-environment
-  PAYMENT_API_KEY: ${PAYMENT_API_KEY:-local-development-api-key-change-me-123456}
-  PAYMENT_DATABASE_URL: postgresql+asyncpg://payments:payments@postgres:5432/payments
-  PAYMENT_RABBITMQ_URL: amqp://payments:payments@rabbitmq:5672/
+  PAYMENT_API_KEY: ${PAYMENT_API_KEY:?Set PAYMENT_API_KEY in .env}
+  PAYMENT_DATABASE_URL: ${PAYMENT_DATABASE_URL:?Set PAYMENT_DATABASE_URL in .env}
+  PAYMENT_RABBITMQ_URL: ${PAYMENT_RABBITMQ_URL:?Set PAYMENT_RABBITMQ_URL in .env}
   PAYMENT_WEBHOOK_ALLOWED_ORIGINS: '${PAYMENT_WEBHOOK_ALLOWED_ORIGINS:-["http://callback:8080"]}'
 
 services:
   postgres:
     image: postgres:18.3-alpine
     environment:
-      POSTGRES_USER: payments
-      POSTGRES_PASSWORD: payments
-      POSTGRES_DB: payments
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -25,8 +25,8 @@ services:
     hostname: rabbitmq
     image: rabbitmq:4.2.4-management-alpine
     environment:
-      RABBITMQ_DEFAULT_USER: payments
-      RABBITMQ_DEFAULT_PASS: payments
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
     ports:
       - "127.0.0.1:${RABBIT_PORT:-5673}:5672"
       - "127.0.0.1:${RABBIT_MANAGEMENT_PORT:-15673}:15672"

@@ -108,7 +108,7 @@ async def test_unroutable_mandatory_publish_raises(resources):
 async def test_failure_is_rescheduled_and_recovers(resources):
     engine, publisher, channel = resources
     event_id, payload = await insert_event(engine)
-    offline = Publisher("amqp://payments:payments@127.0.0.1:1/payments_test", 0.2)
+    offline = Publisher("amqp://127.0.0.1:1/payments_test", 0.2)
     with pytest.raises(OSError):
         await offline.start()
     assert await relay_once(engine, offline)

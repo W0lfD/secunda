@@ -13,7 +13,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.skipif(os.getenv("RUN_COMPOSE_E2E") != "1", reason="set RUN_COMPOSE_E2E=1"),
 ]
-KEY = "local-development-api-key-change-me-123456"
+KEY = os.getenv("PAYMENT_API_KEY", "")
 
 
 def test_compose_recovers_pending_work_and_delivers_callbacks():
@@ -104,7 +104,7 @@ def test_compose_recovers_pending_work_and_delivers_callbacks():
         def dead_messages():
             response = httpx.post(
                 management + "/api/queues/%2F/payments.dlq/get",
-                auth=("payments", "payments"),
+                auth=(env["RABBITMQ_USER"], env["RABBITMQ_PASSWORD"]),
                 json={"count": 10, "ackmode": "ack_requeue_true", "encoding": "auto"},
                 timeout=5,
             )
@@ -143,7 +143,7 @@ def test_rabbitmq_message_survives_container_recreation():
         port = compose("port", "rabbitmq", "15672").strip().rsplit(":", 1)[1]
         return f"http://127.0.0.1:{port}/api"
 
-    auth = ("payments", "payments")
+    auth = (env["RABBITMQ_USER"], env["RABBITMQ_PASSWORD"])
     try:
         compose("up", "-d", "--wait", "rabbitmq")
         api = management()

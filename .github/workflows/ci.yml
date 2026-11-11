@@ -11,6 +11,19 @@ jobs:
         with:
           version: 0.11.27
           python-version: 3.12.12
+      - name: Create disposable local configuration
+        run: |
+          python - <<'PY'
+          import os
+          import secrets
+          from pathlib import Path
+          os.umask(0o077)
+          config = Path('.env.example').read_text()
+          for name in ('POSTGRES_PASSWORD', 'RABBITMQ_PASSWORD', 'PAYMENT_API_KEY'):
+              config = config.replace(f'{name}=\n', f'{name}={secrets.token_hex(32)}\n')
+          with open('.env', 'x') as output:
+              output.write(config)
+          PY
       - run: make sync format lint typecheck audit
       - run: make unit integration smoke
       - name: Collect service logs on failure

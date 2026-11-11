@@ -2,17 +2,17 @@ import asyncio
 import os
 
 from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from payment_service.models import Base
 
+load_dotenv()
 config = context.config
 config.set_main_option(
     "sqlalchemy.url",
-    os.environ.get("PAYMENT_DATABASE_URL", config.get_main_option("sqlalchemy.url")).replace(
-        "%", "%%"
-    ),
+    os.environ["PAYMENT_DATABASE_URL"].replace("%", "%%"),
 )
 target_metadata = Base.metadata
 
