@@ -21,7 +21,7 @@ docker compose ps
 
 `migrate` выполняется перед API и consumer; профиль `demo` запускает получатель на порту 8080. `PAYMENT_WEBHOOK_ALLOWED_ORIGINS` — JSON-массив разрешённых origin; для demo разрешён `http://callback:8080`. Ключ из `.env` должен содержать минимум 32 символа после удаления пробелов по краям. Все HTTP endpoints, включая `/ready`, `/docs` и `/openapi.json`, требуют статический `X-API-Key`; Swagger UI не добавляет заголовок самостоятельно.
 
-```sh
+```bash
 export KEY=local-development-api-key-change-me-123456
 export BODY='{"amount":"12.34","currency":"USD","description":"Заказ","metadata":{"order":1},"webhook_url":"http://callback:8080/ok"}'
 curl -sS -H "X-API-Key: $KEY" http://127.0.0.1:8000/ready
